@@ -117,11 +117,38 @@ var supportedAlgorithms = map[string]bool{
 	PS512: true,
 }
 
+type NewProviderOptions struct {
+	// CustomIssuerVerifier replaces the direct string comparison for some
+	// providers that are not fully open id compliant.
+	//
+	// For example https://login.microsoftonline.com/common/v2.0
+	// returns a issuer https://login.microsoftonline.com/{tenantid}/v2.0 which
+	// is incompliant, but can still be used in a multi tenant situation.
+	CustomIssuerVerifier func(expected string, received string) bool
+}
+
+func (opt *NewProviderOptions) VerifyIssuer(expected string, received string) bool {
+	if opt != nil && opt.CustomIssuerVerifier != nil {
+		return opt.CustomIssuerVerifier(expected, received)
+	}
+	return expected == received
+}
+
 // NewProvider uses the OpenID Connect discovery mechanism to construct a Provider.
 //
 // The issuer is the URL identifier for the service. For example: "https://accounts.google.com"
 // or "https://login.salesforce.com".
 func NewProvider(ctx context.Context, issuer string) (*Provider, error) {
+	return NewProviderWithOptions(ctx, issuer, nil)
+}
+
+// NewProviderWithOptions uses the OpenID Connect discovery mechanism to construct a Provider.
+//
+// The issuer is the URL identifier for the service. For example: "https://accounts.google.com"
+// or "https://login.salesforce.com".
+//
+// It accepts a set of options which can affect how a provider is created.
+func NewProviderWithOptions(ctx context.Context, issuer string, options *NewProviderOptions) (*Provider, error) {
 	wellKnown := strings.TrimSuffix(issuer, "/") + "/.well-known/openid-configuration"
 	req, err := http.NewRequest("GET", wellKnown, nil)
 	if err != nil {
@@ -148,7 +175,7 @@ func NewProvider(ctx context.Context, issuer string) (*Provider, error) {
 		return nil, fmt.Errorf("oidc: failed to decode provider discovery object: %v", err)
 	}
 
-	if p.Issuer != issuer {
+	if !options.VerifyIssuer(issuer, p.Issuer) {
 		return nil, fmt.Errorf("oidc: issuer did not match the issuer returned by provider, expected %q got %q", issuer, p.Issuer)
 	}
 	var algs []string
